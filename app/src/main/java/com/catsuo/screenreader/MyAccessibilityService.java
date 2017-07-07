@@ -1,17 +1,17 @@
-package com.example.cat.accessibilityservicetest;
+package com.catsuo.screenreader;
 
 import android.accessibilityservice.AccessibilityService;
-import android.annotation.TargetApi;
 import android.os.Build;
-import android.support.annotation.RequiresApi;
+import android.os.Bundle;
 import android.support.v4.view.accessibility.AccessibilityEventCompat;
 import android.support.v4.view.accessibility.AccessibilityNodeInfoCompat;
 import android.support.v4.view.accessibility.AccessibilityRecordCompat;
-import android.util.ArraySet;
 import android.util.Log;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityWindowInfo;
+
+import com.catsuo.screenreader.ui.ToastWindowControler;
 
 import java.util.Set;
 
@@ -21,10 +21,22 @@ import java.util.Set;
 
 public class MyAccessibilityService extends AccessibilityService {
 
+    /**
+     * Direction constant for forward movement within a page.
+     */
+    public static final int DIRECTION_FORWARD = 1;
+
+    /**
+     * Direction constant for backward movement within a page.
+     */
+    public static final int DIRECTION_BACKWARD = -1;
+
     private static final int MASK_TYPE = AccessibilityEvent.TYPE_VIEW_HOVER_ENTER | AccessibilityEvent.TYPE_VIEW_CLICKED;
     private static final int MASK_ACCEPTED_EVENT_TYPES =
             AccessibilityEventCompat.TYPE_VIEW_ACCESSIBILITY_FOCUSED
                     | AccessibilityEventCompat.TYPE_VIEW_HOVER_ENTER;
+
+    private ToastWindowControler mToastControler = null;
 
 
     public static boolean supportsWebActions(AccessibilityNodeInfoCompat node) {
@@ -86,8 +98,39 @@ public class MyAccessibilityService extends AccessibilityService {
         return node.getChildCount() == 0;
     }
 
-    @TargetApi(Build.VERSION_CODES.N)
-    @RequiresApi(api = Build.VERSION_CODES.M)
+
+    public static boolean performSpecialAction(AccessibilityNodeInfoCompat node, int action) {
+        return performSpecialAction(node, action, DIRECTION_FORWARD);
+    }
+
+    private static boolean performSpecialAction(
+            AccessibilityNodeInfoCompat node, int action, int direction) {
+        /*
+         * We use performNavigationAtGranularity to communicate with ChromeVox
+         * for these actions because it is side-effect-free. If we use
+         * performNavigationToHtmlElementAction and ChromeVox isn't injected,
+         * we'll actually move selection within the fallback implementation. We
+         * use the granularity field to hold a value that ChromeVox interprets
+         * as a special command.
+         */
+        return performNavigationAtGranularityAction(node, direction, action /* fake granularity */);
+    }
+
+    public static boolean performNavigationAtGranularityAction(
+            AccessibilityNodeInfoCompat node, int direction, int granularity) {
+        if (node == null) {
+            return false;
+        }
+
+        final int action = (direction == DIRECTION_FORWARD)
+                ? AccessibilityNodeInfoCompat.ACTION_NEXT_AT_MOVEMENT_GRANULARITY
+                : AccessibilityNodeInfoCompat.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY;
+        final Bundle args = new Bundle();
+        args.putInt(
+                AccessibilityNodeInfoCompat.ACTION_ARGUMENT_MOVEMENT_GRANULARITY_INT, granularity);
+        return node.performAction(action, args);
+    }
+
     @Override
     public void onAccessibilityEvent(AccessibilityEvent accessibilityEvent) {
 
@@ -95,11 +138,18 @@ public class MyAccessibilityService extends AccessibilityService {
         final AccessibilityNodeInfoCompat source = record.getSource();
 
         //int flag = accessibilityEvent.getEventType();
-        Log.d("SJC", "onAccessibilityEvent-" + accessibilityEvent.getEventType());
+        Log.d("SJC", "onAccessibilityEvent " + accessibilityEvent.getEventType());
         if ((accessibilityEvent.getEventType() & MASK_ACCEPTED_EVENT_TYPES) != 0 && hasLegacyWebContent(source)) {
             Log.d("SJC", "onAccessibilityEvent web content " + accessibilityEvent.getEventType() + source.toString());
+            if (mToastControler != null) {
+                mToastControler.invalidate(source.getText() + " " + source.getContentDescription());
+            }
+            //performSpecialAction(source, -2);
         } else if ((accessibilityEvent.getEventType() & AccessibilityEvent.TYPE_VIEW_CLICKED) != 0) {
             Log.d("SJC", "onAccessibilityEvent onclick " + accessibilityEvent.getEventType() + source.toString());
+            if (mToastControler != null) {
+                mToastControler.invalidate(source.getText() + " " + source.getContentDescription());
+            }
         }
 
 
@@ -213,6 +263,7 @@ public class MyAccessibilityService extends AccessibilityService {
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
+        mToastControler = ToastWindowControler.getInstance(getApplicationContext());
         Log.i("SJC", "onServiceConnected");
     }
 }
